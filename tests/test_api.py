@@ -191,3 +191,9 @@ def test_wsgi_entry_point(tmp_path, monkeypatch):
     wsgi = importlib.import_module("wsgi")
     assert wsgi.app.config["DATABASE"] == str(tmp_path / "wsgi.db")
     assert wsgi.app.test_client().get("/health").status_code == 200
+
+
+def test_calories_rejects_non_finite_weight(client):
+    for bad in ("inf", "nan"):
+        resp = client.get(f"/calories?weight={bad}&program=MG")
+        assert resp.status_code == 400

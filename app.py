@@ -6,6 +6,7 @@ it can be unit tested without the HTTP layer.
 """
 import csv
 import io
+import math
 import os
 import random
 import sqlite3
@@ -202,6 +203,8 @@ def to_number(value, field, cast=float, minimum=0, maximum=None, required=False)
         number = cast(value)
     except (TypeError, ValueError):
         raise ValidationError(f"{field} must be a number") from None
+    if not math.isfinite(number):
+        raise ValidationError(f"{field} must be a finite number")
     if number < minimum or (maximum is not None and number > maximum):
         raise ValidationError(f"{field} is out of range")
     return number
