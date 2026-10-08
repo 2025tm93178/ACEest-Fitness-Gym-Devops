@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.db
+*.pdf
+.env
+
+# Test and coverage reports
+.coverage
+coverage.xml
+htmlcov/
+test-results.xml
+
+# IDE and local notes (not part of the submission)
+.vs/
+.vscode/
+.idea/
+CLAUDE.md
+aceest-assignment-guide.md
+setup-git-history.ps1
