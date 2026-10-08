@@ -31,7 +31,7 @@ pipeline {
         stage('Clean Build Environment') {
             steps {
                 script {
-                    env.PY = isUnix() ? '.venv/bin/python' : '.venv\Scripts\python'
+                    env.PY = isUnix() ? '.venv/bin/python' : '.venv\\Scripts\\python'
                     run "${isUnix() ? 'python3' : 'python'} -m venv .venv"
                     run "${env.PY} -m pip install --upgrade pip"
                     run "${env.PY} -m pip install -r requirements-dev.txt"
