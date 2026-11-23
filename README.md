@@ -43,6 +43,7 @@ tests/                      Pytest suite: business logic, API and deploy tool
 Dockerfile                  Multi-stage image (base, test, runtime)
 k8s/                        Kubernetes manifests, one folder per deployment strategy
 k8s/deployctl.py            Deploy, smoke test, rollback and promote tool
+scripts/setup-lab-vm.sh     One-shot lab VM setup (minikube, ingress, SonarQube, Jenkins access)
 Jenkinsfile                 Jenkins CI/CD pipeline
 sonar-project.properties    SonarQube analysis settings
 .github/workflows/main.yml  GitHub Actions pipeline
@@ -191,6 +192,17 @@ the cluster (`/health` and `/version`, checking the version, build and track), a
 failed rollout or smoke test is rolled back automatically to the last stable version.
 
 ### Running it on Minikube
+
+On a Rocky/RHEL lab VM, `scripts/setup-lab-vm.sh` does the whole setup in one go:
+Docker access, kubectl and minikube, the NGINX ingress, cluster access for Jenkins,
+SonarQube (admin password, analysis token, Jenkins webhook) and the `*.aceest.local`
+host names. It then prints the remaining Jenkins UI steps with the values filled in.
+
+```bash
+bash scripts/setup-lab-vm.sh
+```
+
+Or by hand:
 
 ```bash
 minikube start
