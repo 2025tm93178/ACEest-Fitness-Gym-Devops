@@ -2,15 +2,17 @@
 
 [![ACEest CI/CD](https://github.com/2025tm93178/ACEest-Fitness-Gym-Devops/actions/workflows/main.yml/badge.svg)](https://github.com/2025tm93178/ACEest-Fitness-Gym-Devops/actions/workflows/main.yml)
 
-A Flask REST service for gym client management, with an automated build, test and
-container pipeline on GitHub Actions and Jenkins. It is a web port of the ACEest
-desktop application (the original Tkinter versions are kept in `legacy/` for reference).
+A Flask REST service for gym client management, delivered by a fully automated CI/CD
+pipeline: Git and GitHub, Pytest, Jenkins, SonarQube, Docker and Docker Hub, and
+Kubernetes (Minikube) with five deployment strategies and automatic rollback. It is a
+web port of the ACEest desktop application; the original Tkinter versions 1.0 to 3.2.4
+are kept in `legacy/`.
 
 ## Features
 
 | Area | Endpoints |
 | --- | --- |
-| Service | `GET /`, `GET /health` |
+| Service | `GET /`, `GET /health`, `GET /version` |
 | Programmes | `GET /programs`, `GET /programs/<code>` (`FL`, `MG`, `BG`) |
 | Calculators | `GET /calories?weight=70&program=MG`, `GET /bmi?weight=70&height=175` |
 | Clients | `POST /clients`, `GET /clients`, `GET /clients/<name>`, `DELETE /clients/<name>` |
@@ -21,20 +23,29 @@ desktop application (the original Tkinter versions are kept in `legacy/` for ref
 All responses are JSON (except the CSV export). Invalid input returns `400` and an
 unknown client or route returns `404`, both with a body of the form `{"error": "..."}`.
 
+`GET /version` reports which release is answering, for example
+`{"version": "2.0.0", "build": "17", "track": "canary", ...}`: the version comes from the
+`VERSION` file, the build number is baked into the image by the pipeline, and the track
+is set by the Kubernetes manifests. This makes every deployment strategy observable.
+
 Data is stored in SQLite. The database path is read from the `ACEEST_DB`
 environment variable (default `aceest_fitness.db`).
 
 ## Project structure
 
 ```
+ACEest_Fitness.py           Entry point (gunicorn ACEest_Fitness:app, or python ACEest_Fitness.py)
 app.py                      Flask application factory, routes and business logic
-wsgi.py                     Gunicorn entry point
+VERSION                     Release version (semantic versioning)
 requirements.txt            Runtime dependencies (Flask, Gunicorn)
 requirements-dev.txt        Runtime + pytest, pytest-cov, flake8
-tests/                      Pytest suite: business logic and API tests
+tests/                      Pytest suite: business logic, API and deploy tool
 Dockerfile                  Multi-stage image (base, test, runtime)
+k8s/                        Kubernetes manifests, one folder per deployment strategy
+k8s/deployctl.py            Deploy, smoke test, rollback and promote tool
+Jenkinsfile                 Jenkins CI/CD pipeline
+sonar-project.properties    SonarQube analysis settings
 .github/workflows/main.yml  GitHub Actions pipeline
-Jenkinsfile                 Jenkins BUILD pipeline
 legacy/                     Original Tkinter versions 1.0 to 3.2.4
 ```
 
@@ -53,13 +64,13 @@ cd ACEest-Fitness-Gym-Devops
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
-python app.py
+python ACEest_Fitness.py
 ```
 
 The service listens on http://localhost:5000. Try it:
 
 ```bash
-curl http://localhost:5000/health
+curl http://localhost:5000/version
 curl -X POST http://localhost:5000/clients \
      -H "Content-Type: application/json" \
      -d '{"name": "Ravi", "age": 30, "height": 175, "weight": 70, "program": "MG"}'
@@ -70,19 +81,19 @@ curl "http://localhost:5000/clients/Ravi/program-plan?level=intermediate"
 ### Running with Docker
 
 ```bash
-docker build -t aceest-fitness .
+docker build --build-arg APP_VERSION=$(cat VERSION) -t aceest-fitness .
 docker run --rm -p 5000:5000 -v aceest-data:/data aceest-fitness
 ```
 
 The named volume keeps the database between container restarts.
 
-## Running the tests manually
+## Running the tests
 
 ```bash
-pytest -v                                    # full suite
-pytest tests/test_api.py::test_csv_export    # a single test
-pytest --cov=app --cov=wsgi --cov-report=term-missing   # with coverage
-flake8 .                                     # lint
+pytest -v                                                    # full suite
+pytest tests/test_api.py::test_csv_export                    # a single test
+pytest --cov=app --cov=ACEest_Fitness --cov=deployctl --cov-report=term-missing
+flake8 .                                                     # lint
 ```
 
 Inside a container, exactly as the pipelines do:
@@ -92,96 +103,166 @@ docker build --target test -t aceest-fitness:test .
 docker run --rm aceest-fitness:test
 ```
 
-The suite has 51 tests with 100% line coverage. The pipelines fail the build if
+The suite has 88 tests with 100% line coverage; the pipelines fail the build if
 coverage drops below 90%.
 
-- `tests/test_logic.py` covers the business rules on their own: calorie factors,
-  BMI values and categories, membership expiry, the programme generator (with a
-  seeded random generator so results are repeatable) and input validation.
-- `tests/test_api.py` exercises every endpoint through the Flask test client:
-  success responses, validation errors, 404s, upserts, cascade deletes, CSV export
-  and the Gunicorn entry point. Each test gets a fresh temporary database
-  (`tests/conftest.py`), so tests never depend on each other.
+- `tests/test_logic.py`: the business rules on their own (calorie factors, BMI,
+  membership expiry, the seeded programme generator, input validation, VERSION file).
+- `tests/test_api.py`: every endpoint through the Flask test client, each test on a
+  fresh temporary database (`tests/conftest.py`).
+- `tests/test_deployctl.py`: every deployment strategy, smoke test and rollback path of
+  `k8s/deployctl.py`, run against an in-memory fake of `kubectl`.
 
-## Docker image design
-
-- **Multi-stage build.** `base` holds the runtime dependencies and code, `test`
-  adds pytest, flake8 and the tests, and `runtime` is the default target that
-  ships. Test tooling never reaches the deployed image.
-- **Small base and cached layers.** `python:3.12-slim`, `pip --no-cache-dir`,
-  and `requirements.txt` copied before the code so dependency layers are reused.
-  `.dockerignore` keeps Git history, legacy code, docs and local databases out
-  of the build context.
-- **Least privilege.** The runtime stage runs as a non-root user (`aceest`,
-  UID 10001) that can write only to the `/data` volume.
-- **Production server.** Gunicorn serves the app, and a `HEALTHCHECK` polls `/health`.
-
-## CI/CD integration
+## CI/CD architecture
 
 ```
- developer push / pull request
-            │
-            ├──► GitHub Actions ── Build & Lint (3.10/3.11/3.12) ──► Docker image + Pytest in container ──► runtime image smoke test
-            │
-            └──► Jenkins (polls every 5 min) ── clean venv ──► lint ──► unit tests + coverage ──► Docker build ──► container tests
+ developer ─► feature branch ─► pull request ─► main ─► tag vX.Y.Z
+                     │                            │            │
+                     ▼                            ▼            ▼
+              GitHub Actions               Jenkins (polls      GitHub Actions
+              lint · manifests ·           every 5 min)        publish vX.Y.Z
+              tests in Docker ·                 │               to Docker Hub
+              image smoke test                  ▼
+   lint ─► unit tests ─► SonarQube + quality gate ─► Docker build ─► Pytest in container
+        ─► build artifacts ─► push to Docker Hub ─► deploy to Minikube (strategy)
+        ─► smoke test ─► automatic rollback to the last stable version on failure
 ```
-
-Both pipelines run the same checks from the same files (`requirements-dev.txt`,
-`.flake8`, `pytest.ini`, `Dockerfile`), so a change that passes on a laptop
-passes in CI.
-
-### GitHub Actions (`.github/workflows/main.yml`)
-
-Runs on every `push` and `pull_request`, on any branch.
-
-1. **Build & Lint.** On Python 3.10, 3.11 and 3.12: install dependencies,
-   byte-compile the sources to catch syntax errors, then run flake8.
-2. **Docker Image Assembly.** Builds the `test` stage of the Dockerfile.
-3. **Automated Testing.** Runs the Pytest suite inside that container, with a
-   90% coverage gate.
-4. **Runtime image smoke test.** Builds the deployable image, starts it, checks
-   `/health`, creates a client, reads its BMI, and confirms the container runs as
-   the non-root user.
-
-The Docker job depends on the lint job, so a lint failure stops the pipeline
-early. A newer push to the same branch cancels the older run.
 
 ### Jenkins (`Jenkinsfile`)
 
-Jenkins is the BUILD environment and a second quality gate, independent of
-GitHub's runners. It works on Linux, macOS and Windows agents (shell steps run
-with `sh` or `bat` as appropriate).
+| Stage | What it does |
+| --- | --- |
+| Checkout | Clean workspace; reads `VERSION`; names the build `vX.Y.Z-b<N>` |
+| Clean Build Environment | Fresh virtualenv with `requirements-dev.txt` |
+| Compile & Lint | `compileall` and flake8 |
+| Unit Tests | Pytest, JUnit report, `coverage.xml`, 90% coverage gate |
+| SonarQube Analysis / Quality Gate | Static analysis with coverage; the build stops if the gate fails |
+| Docker Build | Runtime image `aceest-fitness:X.Y.Z-b<N>` with version and build baked in |
+| Container Tests | The Dockerfile `test` stage runs the whole suite inside the container |
+| Build Artifacts | `dist/aceest-fitness-X.Y.Z-b<N>.zip` (source) and `build-info.json`, archived and fingerprinted |
+| Push to Docker Hub | Tags `X.Y.Z-b<N>`, `X.Y.Z` and `latest` |
+| Deploy to Kubernetes | `k8s/deployctl.py deploy <strategy>`: rollout, smoke test, automatic rollback, status |
 
-1. **Checkout.** Wipes the workspace and pulls the latest code from GitHub.
-2. **Clean Build Environment.** Creates a fresh virtualenv and installs dependencies.
-3. **Compile & Lint.** Byte-compiles the sources and runs flake8.
-4. **Unit Tests.** Runs Pytest with a 90% coverage gate, publishes the JUnit
-   report and archives `coverage.xml`.
-5. **Docker Build.** Builds the runtime image with `--no-cache`, tagged with the
-   build number.
-6. **Container Tests.** Builds the `test` image and runs the suite inside it.
+Build parameters: `DEPLOY_STRATEGY` (`all`, `rolling`, `blue-green`, `canary`,
+`ab-testing`, `shadow`, `none`), `RUN_SONAR`, `PUSH_IMAGE`, `DOCKERHUB_REPO`,
+`KUBECONFIG_CREDENTIAL` and `SIMULATE_FAILURE` (makes the smoke test fail on purpose to
+demonstrate the automatic rollback). Polled builds use the first choice of each.
 
-Setup: install the suggested plugins (they include Pipeline, Git, JUnit,
-Timestamper and Workspace Cleanup), then create a **Pipeline** job, choose
-*Pipeline script from SCM*, select Git, and enter the repository URL, branch
-`*/main` and script path `Jenkinsfile`. The agent needs Python 3.10+, Git and
-Docker on its PATH, and the Jenkins user must be allowed to run Docker. The job
-polls GitHub every five minutes; a GitHub webhook can replace polling when
-Jenkins has a public URL.
+### Jenkins setup
+
+1. Plugins: the suggested set (Pipeline, Git, JUnit, Credentials Binding, Timestamper,
+   Workspace Cleanup) plus **SonarQube Scanner**.
+2. Credentials: `dockerhub-creds`, *Username with password* (Docker Hub username and an
+   access token from Docker Hub → Account settings → Personal access tokens).
+3. SonarQube: run a server (`docker run -d --name sonarqube -p 9000:9000
+   sonarqube:lts-community`), create a token, then in *Manage Jenkins → System* add a
+   SonarQube server named `SonarQube` (URL + token credential), and in *Tools* add a
+   SonarQube Scanner installation named `SonarScanner`. In SonarQube add a webhook to
+   `http://<jenkins-host>:8080/sonarqube-webhook/` so the quality gate result is reported.
+4. Job: *Pipeline script from SCM* → Git → this repository, branch `*/main`, script
+   path `Jenkinsfile`. The agent needs Python 3.10+, Git, Docker and kubectl; the
+   Jenkins user must be allowed to run Docker and read the cluster's kubeconfig.
+
+### GitHub Actions (`.github/workflows/main.yml`)
+
+Runs on every push and pull request: flake8 and compile on Python 3.10–3.12, schema
+validation of every Kubernetes manifest (kubeconform), the Pytest suite inside the
+Docker `test` image, and a smoke test of the runtime image (`/health`, `/version`,
+creating a client, non-root user). Pushing a tag `vX.Y.Z` also publishes the image
+`X.Y.Z` to Docker Hub when the repository secrets `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN` are set.
+
+## Kubernetes deployment strategies
+
+All strategies run side by side in the `aceest` namespace, each behind the NGINX ingress
+on its own host name. Every pod runs as a non-root user, is only sent traffic once
+`/health` passes (readiness probe), and is restarted if it stops answering (liveness probe).
+
+| Strategy | Manifests | How a new release goes out | Rollback |
+| --- | --- | --- | --- |
+| Rolling update | `k8s/rolling/` | Pods replaced one at a time (`maxSurge 1`, `maxUnavailable 0`) | `kubectl rollout undo` |
+| Blue-green | `k8s/blue-green/` | New version on the idle colour, tested, then the live service is switched | Switch the service back to the previous colour (still running) |
+| Canary | `k8s/canary/` | New version on `aceest-canary`, then 20% of traffic via `canary-weight` | Weight to 0 and canary back to the stable image |
+| A/B testing | `k8s/ab-testing/` | Variant B serves requests with header `X-Variant: B` (or cookie `aceest_variant=always`) | Variant B back to variant A's image |
+| Shadow | `k8s/shadow/` | Primary serves users; every request is mirrored to the shadow, whose responses are discarded | Shadow back to the primary's image |
+
+`k8s/deployctl.py` performs each strategy. Every deployment is smoke tested from inside
+the cluster (`/health` and `/version`, checking the version, build and track), and any
+failed rollout or smoke test is rolled back automatically to the last stable version.
+
+### Running it on Minikube
+
+```bash
+minikube start
+minikube addons enable ingress
+
+# First deploy installs the manifests; later deploys roll out the new image.
+python k8s/deployctl.py deploy all --image <dockerhub-user>/aceest-fitness:2.0.0
+python k8s/deployctl.py status
+
+# After a canary, A/B or shadow release has proved itself:
+python k8s/deployctl.py promote canary
+# Manual rollback of any strategy:
+python k8s/deployctl.py rollback blue-green
+```
+
+### Endpoints
+
+Point the five host names at the cluster (`minikube ip`), e.g. in `/etc/hosts` or
+`C:\Windows\System32\drivers\etc\hosts`:
+
+```
+<minikube-ip>  rolling.aceest.local bluegreen.aceest.local canary.aceest.local ab.aceest.local shadow.aceest.local
+```
+
+| Strategy | URL |
+| --- | --- |
+| Rolling update | http://rolling.aceest.local/version |
+| Blue-green | http://bluegreen.aceest.local/version |
+| Canary | http://canary.aceest.local/version |
+| A/B testing | http://ab.aceest.local/version (add `-H "X-Variant: B"` for variant B) |
+| Shadow | http://shadow.aceest.local/version |
+
+To see the traffic split without editing hosts, `deployctl` sends requests through the
+ingress and counts which release answered:
+
+```bash
+python k8s/deployctl.py traffic canary --ip $(minikube ip) --count 50
+python k8s/deployctl.py traffic ab-testing --ip $(minikube ip) --header "X-Variant: B"
+```
+
+With the Docker driver on macOS or Windows, run `minikube tunnel` and use `127.0.0.1`.
+
+## Versioning and Docker Hub
+
+- The release version lives in `VERSION` (semantic versioning) and is reported by
+  `GET /` and `GET /version`. Releases are tagged in Git as `vX.Y.Z`.
+- `v1.0.0` is the Assignment 1 release; `v2.0.0` adds versioning, the `/version`
+  endpoint, SonarQube, Docker Hub publishing and Kubernetes deployments.
+- Every Jenkins build pushes `<user>/aceest-fitness:X.Y.Z-b<N>` plus the moving tags
+  `X.Y.Z` and `latest`, so Docker Hub keeps every version and every build.
+
+To publish an earlier release by hand (for example `v1.0.0`):
+
+```bash
+git checkout v1.0.0
+docker build -t <user>/aceest-fitness:1.0.0 . && docker push <user>/aceest-fitness:1.0.0
+git checkout main
+```
 
 ## Branching strategy
 
 - `main` is always releasable. Work happens on short-lived branches that are
-  merged back with a merge commit or a pull request:
+  merged back with a pull request:
   - `feature/...` for application changes
   - `test/...` for tests
-  - `ci/...` and `infra/...` for pipelines and Docker
+  - `ci/...` and `infra/...` for pipelines, Docker and Kubernetes
   - `fix/...` for bug fixes
   - `docs/...` for documentation
 - Commit messages follow the Conventional Commits style (`feat:`, `fix:`,
   `test:`, `ci:`, `build:`, `docs:`, `chore:`).
 - Every push and pull request is checked by GitHub Actions before merging, and
-  Jenkins builds `main` after each merge.
+  Jenkins builds and deploys `main` after each merge. Releases are tagged `vX.Y.Z`.
 
 ## Version history
 
@@ -195,8 +276,14 @@ The Flask service carries forward the features introduced across the desktop ver
 | 2.0.1, 2.1.2 | SQLite persistence, weekly adherence | `/clients/<name>/progress` |
 | 2.2.1 | Adherence history | `GET /clients/<name>/progress` |
 | 2.2.4, 3.0.1 | Workouts, body metrics, BMI, goals | `/workouts`, `/metrics`, `/bmi` |
-| 3.1.2 | Membership expiry, programme generator | `/membership`, `/program-plan` |
-| 3.2.4 | Consolidated release | `APP_VERSION` in `app.py` |
+| 3.1.2, 3.2.4 | Membership expiry, programme generator | `/membership`, `/program-plan` |
 
-The desktop login screen (a hard-coded `admin`/`admin` account) and the PDF
-report were not ported.
+The desktop login screen (a hard-coded `admin`/`admin` account), the PDF report and the
+per-workout exercise log were not ported.
+
+Releases of the web service:
+
+| Release | Contents |
+| --- | --- |
+| 1.0.0 | Flask REST port, Pytest suite, Docker image, GitHub Actions and Jenkins build pipelines (Assignment 1) |
+| 2.0.0 | `ACEest_Fitness.py` entry point, `VERSION` and `/version`, SonarQube quality gate, Docker Hub publishing, Kubernetes rolling / blue-green / canary / A/B / shadow deployments with automatic rollback (Assignment 2) |
