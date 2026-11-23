@@ -1,0 +1,49 @@
+# Main route: everything goes to the stable release...
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aceest-canary-main
+  namespace: aceest
+  labels:
+    app: aceest
+    strategy: canary
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: canary.aceest.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aceest-stable
+                port:
+                  number: 80
+---
+# ...except the share set by canary-weight (percent). The deploy tool raises it
+# to 20 once the canary passes its smoke test and sets it back to 0 on rollback.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aceest-canary-weighted
+  namespace: aceest
+  labels:
+    app: aceest
+    strategy: canary
+  annotations:
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-weight: "0"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: canary.aceest.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aceest-canary
+                port:
+                  number: 80

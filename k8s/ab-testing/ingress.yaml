@@ -1,0 +1,51 @@
+# Variant A serves everyone by default...
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aceest-ab-a
+  namespace: aceest
+  labels:
+    app: aceest
+    strategy: ab-testing
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: ab.aceest.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aceest-a
+                port:
+                  number: 80
+---
+# ...variant B serves requests with the header 'X-Variant: B' or the cookie
+# 'aceest_variant=always', so a user stays in the same group on every request.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aceest-ab-b
+  namespace: aceest
+  labels:
+    app: aceest
+    strategy: ab-testing
+  annotations:
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-by-header: "X-Variant"
+    nginx.ingress.kubernetes.io/canary-by-header-value: "B"
+    nginx.ingress.kubernetes.io/canary-by-cookie: "aceest_variant"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: ab.aceest.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aceest-b
+                port:
+                  number: 80

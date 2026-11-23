@@ -1,0 +1,59 @@
+# Live service. Cut-over = patch spec.selector.track to the other colour;
+# rollback = patch it back (the previous colour is kept running and recorded
+# in the aceest.io/previous-track annotation).
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-bluegreen
+  namespace: aceest
+  labels:
+    app: aceest
+    strategy: blue-green
+  annotations:
+    aceest.io/previous-track: "green"
+spec:
+  selector:
+    app: aceest
+    strategy: blue-green
+    track: blue
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Preview services: reach each colour directly, whichever is live.
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-blue
+  namespace: aceest
+  labels:
+    app: aceest
+    strategy: blue-green
+spec:
+  selector:
+    app: aceest
+    strategy: blue-green
+    track: blue
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-green
+  namespace: aceest
+  labels:
+    app: aceest
+    strategy: blue-green
+spec:
+  selector:
+    app: aceest
+    strategy: blue-green
+    track: green
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
