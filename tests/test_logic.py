@@ -103,3 +103,15 @@ def test_to_number_required_and_maximum():
         to_number("", "weight", required=True)
     assert to_number("72.5", "weight") == 72.5
     assert to_number(100, "bodyfat", maximum=100) == 100
+
+
+def test_read_version(tmp_path):
+    from app import APP_VERSION, VERSION_FILE, read_version
+
+    with open(VERSION_FILE, encoding="utf-8") as handle:
+        assert APP_VERSION == handle.read().strip()
+    (tmp_path / "VERSION").write_text("9.8.7\n", encoding="utf-8")
+    assert read_version(str(tmp_path / "VERSION")) == "9.8.7"
+    (tmp_path / "EMPTY").write_text("", encoding="utf-8")
+    assert read_version(str(tmp_path / "EMPTY")) == "0.0.0"
+    assert read_version(str(tmp_path / "missing")) == "0.0.0"

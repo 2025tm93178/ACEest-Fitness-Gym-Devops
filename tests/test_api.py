@@ -182,15 +182,33 @@ def test_csv_export_with_no_clients(client):
         "Name,Age,Height,Weight,Program,Calories,Membership Expiry"]
 
 
-def test_wsgi_entry_point(tmp_path, monkeypatch):
+def test_entry_point(tmp_path, monkeypatch):
     import importlib
     import sys
 
-    monkeypatch.setenv("ACEEST_DB", str(tmp_path / "wsgi.db"))
-    sys.modules.pop("wsgi", None)
-    wsgi = importlib.import_module("wsgi")
-    assert wsgi.app.config["DATABASE"] == str(tmp_path / "wsgi.db")
-    assert wsgi.app.test_client().get("/health").status_code == 200
+    monkeypatch.setenv("ACEEST_DB", str(tmp_path / "entry.db"))
+    sys.modules.pop("ACEest_Fitness", None)
+    entry = importlib.import_module("ACEest_Fitness")
+    assert entry.app.config["DATABASE"] == str(tmp_path / "entry.db")
+    assert entry.app.test_client().get("/health").status_code == 200
+
+
+def test_version_endpoint_defaults(client, monkeypatch):
+    import app as app_module
+
+    monkeypatch.delenv("APP_BUILD", raising=False)
+    monkeypatch.delenv("DEPLOY_TRACK", raising=False)
+    body = client.get("/version").get_json()
+    assert body == {"service": "ACEest Fitness & Gym", "version": app_module.APP_VERSION,
+                    "build": "local", "track": "local"}
+    assert client.get("/").get_json()["version"] == app_module.APP_VERSION
+
+
+def test_version_endpoint_reports_build_and_track(client, monkeypatch):
+    monkeypatch.setenv("APP_BUILD", "42")
+    monkeypatch.setenv("DEPLOY_TRACK", "canary")
+    body = client.get("/version").get_json()
+    assert (body["build"], body["track"]) == ("42", "canary")
 
 
 def test_calories_rejects_non_finite_weight(client):
