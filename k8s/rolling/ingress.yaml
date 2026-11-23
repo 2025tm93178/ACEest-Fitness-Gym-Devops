@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aceest-rolling
+  namespace: aceest
+  labels:
+    app: aceest
+    strategy: rolling
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: rolling.aceest.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aceest-rolling
+                port:
+                  number: 80

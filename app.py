@@ -14,7 +14,19 @@ from datetime import date, datetime
 
 from flask import Flask, Response, current_app, g, jsonify, request
 
-APP_VERSION = "3.2.4"
+VERSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+
+
+def read_version(path=VERSION_FILE):
+    """Release version of the service, kept in the VERSION file (semantic versioning)."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip() or "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
+APP_VERSION = read_version()
 
 PROGRAMS = {
     "FL": {
@@ -270,6 +282,14 @@ def create_app(config=None):
     @app.get("/health")
     def health():
         return jsonify(status="ok")
+
+    @app.get("/version")
+    def version():
+        # APP_BUILD is baked into the image by the pipeline; DEPLOY_TRACK is set by the
+        # Kubernetes manifests (blue, green, canary, ...) so each strategy can be observed.
+        return jsonify(service="ACEest Fitness & Gym", version=APP_VERSION,
+                       build=os.environ.get("APP_BUILD", "local"),
+                       track=os.environ.get("DEPLOY_TRACK", "local"))
 
     # ----- Programmes and calculators -----
     @app.get("/programs")

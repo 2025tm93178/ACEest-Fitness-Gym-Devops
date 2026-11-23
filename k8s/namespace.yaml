@@ -1,0 +1,7 @@
+# Every deployment strategy runs side by side in this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aceest
+  labels:
+    app.kubernetes.io/part-of: aceest-fitness

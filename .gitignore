@@ -7,11 +7,13 @@ venv/
 *.pdf
 .env
 
-# Test and coverage reports
+# Test, coverage, SonarQube and build outputs
 .coverage
 coverage.xml
 htmlcov/
 test-results.xml
+.scannerwork/
+dist/
 
 # IDE and local notes (not part of the submission)
 .vs/
@@ -20,3 +22,8 @@ test-results.xml
 CLAUDE.md
 aceest-assignment-guide.md
 setup-git-history.ps1
+commit_assignment2.sh
+
+# Course material (the brief and the zip of code versions; the versions are in legacy/)
+Introduction to DevOps*.docx
+The code versions for DevOps Assignment*.zip

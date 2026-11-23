@@ -1,0 +1,26 @@
+# Users are served by the primary; ingress-nginx mirrors each request to the
+# shadow service and ignores the shadow's response.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aceest-shadow
+  namespace: aceest
+  labels:
+    app: aceest
+    strategy: shadow
+  annotations:
+    nginx.ingress.kubernetes.io/mirror-target: "http://aceest-shadow.aceest.svc.cluster.local$request_uri"
+    nginx.ingress.kubernetes.io/mirror-request-body: "on"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: shadow.aceest.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aceest-primary
+                port:
+                  number: 80

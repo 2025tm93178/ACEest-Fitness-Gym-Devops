@@ -1,0 +1,72 @@
+# Canary: the new release. The ingress sends it a small share of requests.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-canary
+  namespace: aceest
+  labels:
+    app: aceest
+    strategy: canary
+    track: canary
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  minReadySeconds: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # one extra pod at a time
+      maxUnavailable: 0    # never drop below the desired count: zero downtime
+  selector:
+    matchLabels:
+      app: aceest
+      strategy: canary
+      track: canary
+  template:
+    metadata:
+      labels:
+        app: aceest
+        strategy: canary
+        track: canary
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: aceest
+          image: __IMAGE__
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 5000
+          env:
+            - name: DEPLOY_TRACK
+              value: canary
+            - name: ACEEST_DB
+              value: /data/aceest_fitness.db
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}

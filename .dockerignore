@@ -12,7 +12,15 @@ __pycache__
 coverage.xml
 htmlcov
 test-results.xml
+.scannerwork
+dist
 *.db
 *.md
+*.docx
+*.zip
+*.ps1
+*.sh
+Screenshots
 legacy
 Jenkinsfile
+sonar-project.properties
