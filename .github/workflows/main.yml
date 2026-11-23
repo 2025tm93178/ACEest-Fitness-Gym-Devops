@@ -31,10 +31,21 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Compile (syntax check)
-        run: python -m compileall -q app.py wsgi.py tests
+        run: python -m compileall -q app.py ACEest_Fitness.py k8s tests
 
       - name: Lint with flake8
         run: flake8 .
+
+  k8s-manifests:
+    name: Validate Kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate against the Kubernetes schemas (kubeconform)
+        run: |
+          docker run --rm -v "$PWD/k8s:/k8s" ghcr.io/yannh/kubeconform:v0.6.7 \
+            -strict -summary /k8s
 
   docker-build-and-test:
     name: Docker Image Assembly & Automated Testing
@@ -50,7 +61,10 @@ jobs:
         run: docker run --rm aceest-fitness:test
 
       - name: Build runtime image
-        run: docker build -t aceest-fitness:${{ github.sha }} .
+        run: |
+          docker build --build-arg APP_VERSION="$(cat VERSION)" \
+                       --build-arg APP_BUILD=${{ github.run_number }} \
+                       -t aceest-fitness:${{ github.sha }} .
 
       - name: Smoke test the running container
         run: |
@@ -60,11 +74,13 @@ jobs:
             sleep 2
           done
           curl -fs http://localhost:5000/health
+          curl -fs http://localhost:5000/version | tee version.json
+          grep -q "\"version\":\"$(cat VERSION)\"" version.json
           curl -fs -X POST http://localhost:5000/clients \
                -H "Content-Type: application/json" \
                -d '{"name": "Smoke", "height": 175, "weight": 70, "program": "MG"}'
           curl -fs http://localhost:5000/clients/Smoke/bmi
-          test "$(docker inspect -f '{{.Config.User}}' aceest)" = "aceest"
+          test "$(docker inspect -f '{{.Config.User}}' aceest)" = "10001"
 
       - name: Show container logs on failure
         if: failure()
@@ -73,3 +89,42 @@ jobs:
       - name: Remove container
         if: always()
         run: docker rm -f aceest || true
+
+  publish-image:
+    name: Publish release image to Docker Hub
+    runs-on: ubuntu-latest
+    needs: [docker-build-and-test, k8s-manifests]
+    # Release tags (v2.0.0, v2.1.0, ...) publish a versioned image.
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Docker Hub secrets
+        id: secrets
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::DOCKERHUB_USERNAME / DOCKERHUB_TOKEN secrets are not set; image not published."
+          fi
+
+      - name: Log in to Docker Hub
+        if: steps.secrets.outputs.ready == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          image="${{ secrets.DOCKERHUB_USERNAME }}/aceest-fitness"
+          docker build --build-arg APP_VERSION="$version" \
+                       --build-arg APP_BUILD="release" \
+                       -t "$image:$version" -t "$image:latest" .
+          docker push "$image:$version"
+          docker push "$image:latest"
